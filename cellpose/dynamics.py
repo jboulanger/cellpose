@@ -19,7 +19,7 @@ try:
     import torch
     from torch import optim, nn
     from . import resnet_torch
-    TORCH_ENABLED = True 
+    TORCH_ENABLED = True
     torch_GPU = torch.device('cuda')
     torch_CPU = torch.device('cpu')
 except:
@@ -68,17 +68,17 @@ def _extend_centers(T,y,x,ymed,xmed,Lx, niter):
 
 def _extend_centers_gpu(neighbors, centers, isneighbor, Ly, Lx, n_iter=200, device=torch.device('cuda')):
     """ runs diffusion on GPU to generate flows for training images or quality control
-    
-    neighbors is 9 x pixels in masks, 
-    centers are mask centers, 
+
+    neighbors is 9 x pixels in masks,
+    centers are mask centers,
     isneighbor is valid neighbor boolean 9 x pixels
-    
+
     """
     if device is not None:
         device = device
     nimg = neighbors.shape[0] // 9
     pt = torch.from_numpy(neighbors).to(device)
-    
+
     T = torch.zeros((nimg,Ly,Lx), dtype=torch.double, device=device)
     meds = torch.from_numpy(centers.astype(int)).to(device).long()
     isneigh = torch.from_numpy(isneighbor).to(device)
@@ -87,7 +87,7 @@ def _extend_centers_gpu(neighbors, centers, isneighbor, Ly, Lx, n_iter=200, devi
         Tneigh = T[:, pt[:,:,0], pt[:,:,1]]
         Tneigh *= isneigh
         T[:, pt[0,:,0], pt[0,:,1]] = Tneigh.mean(axis=1)
-    
+
     T = torch.log(1.+ T)
     # gradient positions
     grads = T[:, pt[[2,1,4,3],:,0], pt[[2,1,4,3],:,1]]
@@ -107,17 +107,17 @@ def masks_to_flows_gpu(masks, device=None):
         labelled masks 0=NO masks; 1,2,...=mask labels
     Returns
     -------------
-    mu: float, 3D or 4D array 
+    mu: float, 3D or 4D array
         flows in Y = mu[-2], flows in X = mu[-1].
         if masks are 3D, flows in Z = mu[0].
     mu_c: float, 2D or 3D array
-        for each pixel, the distance to the center of the mask 
-        in which it resides 
+        for each pixel, the distance to the center of the mask
+        in which it resides
     """
     if device is None:
         device = torch.device('cuda')
 
-    
+
     Ly0,Lx0 = masks.shape
     Ly, Lx = Ly0+2, Lx0+2
 
@@ -126,17 +126,17 @@ def masks_to_flows_gpu(masks, device=None):
 
     # get mask pixel neighbors
     y, x = np.nonzero(masks_padded)
-    neighborsY = np.stack((y, y-1, y+1, 
-                           y, y, y-1, 
+    neighborsY = np.stack((y, y-1, y+1,
+                           y, y, y-1,
                            y-1, y+1, y+1), axis=0)
-    neighborsX = np.stack((x, x, x, 
-                           x-1, x+1, x-1, 
+    neighborsX = np.stack((x, x, x,
+                           x-1, x+1, x-1,
                            x+1, x-1, x+1), axis=0)
     neighbors = np.stack((neighborsY, neighborsX), axis=-1)
 
     # get mask centers
     slices = scipy.ndimage.find_objects(masks)
-    
+
     centers = np.zeros((masks.max(), 2), 'int')
     for i,si in enumerate(slices):
         if si is not None:
@@ -150,7 +150,7 @@ def masks_to_flows_gpu(masks, device=None):
             imin = np.argmin((xi-xmed)**2 + (yi-ymed)**2)
             xmed = xi[imin]
             ymed = yi[imin]
-            centers[i,0] = ymed + sr.start 
+            centers[i,0] = ymed + sr.start
             centers[i,1] = xmed + sc.start
 
     # get neighbor validator (not all neighbors are in same mask)
@@ -159,7 +159,7 @@ def masks_to_flows_gpu(masks, device=None):
     ext = np.array([[sr.stop - sr.start + 1, sc.stop - sc.start + 1] for sr, sc in slices])
     n_iter = 2 * (ext.sum(axis=1)).max()
     # run diffusion
-    mu = _extend_centers_gpu(neighbors, centers, isneighbor, Ly, Lx, 
+    mu = _extend_centers_gpu(neighbors, centers, isneighbor, Ly, Lx,
                              n_iter=n_iter, device=device)
 
     # normalize
@@ -175,28 +175,28 @@ def masks_to_flows_gpu(masks, device=None):
 
 def masks_to_flows_cpu(masks, device=None):
     """ convert masks to flows using diffusion from center pixel
-    Center of masks where diffusion starts is defined to be the 
-    closest pixel to the median of all pixels that is inside the 
+    Center of masks where diffusion starts is defined to be the
+    closest pixel to the median of all pixels that is inside the
     mask. Result of diffusion is converted into flows by computing
-    the gradients of the diffusion density map. 
+    the gradients of the diffusion density map.
     Parameters
     -------------
     masks: int, 2D array
         labelled masks 0=NO masks; 1,2,...=mask labels
     Returns
     -------------
-    mu: float, 3D array 
+    mu: float, 3D array
         flows in Y = mu[-2], flows in X = mu[-1].
         if masks are 3D, flows in Z = mu[0].
     mu_c: float, 2D array
-        for each pixel, the distance to the center of the mask 
-        in which it resides 
+        for each pixel, the distance to the center of the mask
+        in which it resides
     """
-    
+
     Ly, Lx = masks.shape
     mu = np.zeros((2, Ly, Lx), np.float64)
     mu_c = np.zeros((Ly, Lx), np.float64)
-    
+
     nmask = masks.max()
     slices = scipy.ndimage.find_objects(masks)
     dia = utils.diameters(masks)[0]
@@ -213,7 +213,7 @@ def masks_to_flows_cpu(masks, device=None):
             imin = np.argmin((x-xmed)**2 + (y-ymed)**2)
             xmed = x[imin]
             ymed = y[imin]
-            
+
             d2 = (x-xmed)**2 + (y-ymed)**2
             mu_c[sr.start+y-1, sc.start+x-1] = np.exp(-d2/s2)
 
@@ -234,10 +234,10 @@ def masks_to_flows_cpu(masks, device=None):
 def masks_to_flows(masks, use_gpu=False, device=None):
     """ convert masks to flows using diffusion from center pixel
 
-    Center of masks where diffusion starts is defined to be the 
-    closest pixel to the median of all pixels that is inside the 
+    Center of masks where diffusion starts is defined to be the
+    closest pixel to the median of all pixels that is inside the
     mask. Result of diffusion is converted into flows by computing
-    the gradients of the diffusion density map. 
+    the gradients of the diffusion density map.
 
     Parameters
     -------------
@@ -248,13 +248,13 @@ def masks_to_flows(masks, use_gpu=False, device=None):
     Returns
     -------------
 
-    mu: float, 3D or 4D array 
+    mu: float, 3D or 4D array
         flows in Y = mu[-2], flows in X = mu[-1].
         if masks are 3D, flows in Z = mu[0].
 
     mu_c: float, 2D or 3D array
-        for each pixel, the distance to the center of the mask 
-        in which it resides 
+        for each pixel, the distance to the center of the mask
+        in which it resides
 
     """
     if masks.max() == 0:
@@ -269,7 +269,7 @@ def masks_to_flows(masks, use_gpu=False, device=None):
         masks_to_flows_device = masks_to_flows_gpu
     else:
         masks_to_flows_device = masks_to_flows_cpu
-        
+
     if masks.ndim==3:
         Lz, Ly, Lx = masks.shape
         mu = np.zeros((3, Lz, Ly, Lx), np.float32)
@@ -290,11 +290,11 @@ def masks_to_flows(masks, use_gpu=False, device=None):
     else:
         raise ValueError('masks_to_flows only takes 2D or 3D arrays')
 
-# It is possible that flows can be eliminated in place of the distance field. The current distance field may not be smooth 
+# It is possible that flows can be eliminated in place of the distance field. The current distance field may not be smooth
 # enough, or maybe the network really does require the flow field prediction to work well. But in 3D, it will be a huge
-# advantage if the network could predict just the distance (and boudnary) classes and not 3 extra flow components. 
+# advantage if the network could predict just the distance (and boudnary) classes and not 3 extra flow components.
 def labels_to_flows(labels, files=None, use_gpu=False, device=None, redo_flows=False):
-    """ convert labels (list of masks or flows) to flows for training model 
+    """ convert labels (list of masks or flows) to flows for training model
 
     if files is not None, flows are saved to files to be reused
 
@@ -318,14 +318,14 @@ def labels_to_flows(labels, files=None, use_gpu=False, device=None, redo_flows=F
         labels = [labels[n][np.newaxis,:,:] for n in range(nimg)]
 
     if labels[0].shape[0] == 1 or labels[0].ndim < 3 or redo_flows: # flows need to be recomputed
-        
+
         dynamics_logger.info('computing flows for labels')
-        
+
         # compute flows; labels are fixed here to be unique, so they need to be passed back
         # make sure labels are unique!
         labels = [fastremap.renumber(label, in_place=True)[0] for label in labels]
         veci = [masks_to_flows(labels[n][0],use_gpu=use_gpu, device=device) for n in trange(nimg)]
-        
+
         # concatenate labels, distance transform, vector flows, heat (boundary and mask are computed in augmentations)
         flows = [np.concatenate((labels[n], labels[n]>0.5, veci[n]), axis=0).astype(np.float32)
                     for n in range(nimg)]
@@ -339,12 +339,12 @@ def labels_to_flows(labels, files=None, use_gpu=False, device=None, redo_flows=F
     return flows
 
 
-@njit(['(int16[:,:,:], float32[:], float32[:], float32[:,:])', 
+@njit(['(int16[:,:,:], float32[:], float32[:], float32[:,:])',
         '(float32[:,:,:], float32[:], float32[:], float32[:,:])'], cache=True)
 def map_coordinates(I, yc, xc, Y):
     """
     bilinear interpolation of image 'I' in-place with ycoordinates yc and xcoordinates xc to Y
-    
+
     Parameters
     -------------
     I : C x Ly x Lx
@@ -387,19 +387,19 @@ def steps2D_interp(p, dP, niter, use_gpu=False, device=None, omni=False, calc_tr
             device = torch_GPU
         shape = np.array(shape)[[1,0]].astype('double')-1  # Y and X dimensions (dP is 2.Ly.Lx), flipped X-1, Y-1
         pt = torch.from_numpy(p[[1,0]].T).double().to(device).unsqueeze(0).unsqueeze(0) # p is n_points by 2, so pt is [1 1 2 n_points]
-        im = torch.from_numpy(dP[[1,0]]).double().to(device).unsqueeze(0) #covert flow numpy array to tensor on GPU, add dimension 
+        im = torch.from_numpy(dP[[1,0]]).double().to(device).unsqueeze(0) #covert flow numpy array to tensor on GPU, add dimension
         # normalize pt between  0 and  1, normalize the flow
-        for k in range(2): 
+        for k in range(2):
             im[:,k,:,:] *= 2./shape[k]
             pt[:,:,:,k] /= shape[k]
-            
+
         # normalize to between -1 and 1
-        pt = pt*2-1 
-        
-        # make an array to track the trajectories 
+        pt = pt*2-1
+
+        # make an array to track the trajectories
         if calc_trace:
             trace = torch.clone(pt).detach()
-        
+
         #here is where the stepping happens
         for t in range(niter):
             if calc_trace:
@@ -408,27 +408,27 @@ def steps2D_interp(p, dP, niter, use_gpu=False, device=None, omni=False, calc_tr
             dPt = torch.nn.functional.grid_sample(im, pt, align_corners=False)
             if omni and OMNI_INSTALLED:
                 dPt /= step_factor(t)
-            
+
             for k in range(2): #clamp the final pixel locations
                 pt[:,:,:,k] = torch.clamp(pt[:,:,:,k] + dPt[:,k,:,:], -1., 1.)
-            
 
-        #undo the normalization from before, reverse order of operations 
+
+        #undo the normalization from before, reverse order of operations
         pt = (pt+1)*0.5
-        for k in range(2): 
+        for k in range(2):
             pt[:,:,:,k] *= shape[k]
-            
+
         if calc_trace:
             trace = (trace+1)*0.5
-            for k in range(2): 
+            for k in range(2):
                 trace[:,:,:,k] *= shape[k]
-                
+
         #pass back to cpu
         if calc_trace:
             tr =  trace[:,:,:,[1,0]].cpu().numpy().squeeze().T
         else:
             tr = None
-        
+
         p =  pt[:,:,:,[1,0]].cpu().numpy().squeeze().T
         return p, tr
     else:
@@ -437,7 +437,7 @@ def steps2D_interp(p, dP, niter, use_gpu=False, device=None, omni=False, calc_tr
             tr = np.zeros((p.shape[0],p.shape[1],niter))
         else:
             tr = None
-            
+
         for t in range(niter):
             if calc_trace:
                 tr[:,:,t] = p.copy()
@@ -452,7 +452,7 @@ def steps2D_interp(p, dP, niter, use_gpu=False, device=None, omni=False, calc_tr
 @njit('(float32[:,:,:,:],float32[:,:,:,:], int32[:,:], int32)', nogil=True)
 def steps3D(p, dP, inds, niter):
     """ run dynamics of pixels to recover masks in 3D
-    
+
     Euler integration of dynamics dP for niter steps
 
     Parameters
@@ -493,7 +493,7 @@ def steps3D(p, dP, inds, niter):
 @njit('(float32[:,:,:], float32[:,:,:], int32[:,:], int32, boolean, boolean)', nogil=True)
 def steps2D(p, dP, inds, niter, omni=False, calc_trace=False):
     """ run dynamics of pixels to recover masks in 2D
-    
+
     Euler integration of dynamics dP for niter steps
 
     Parameters
@@ -540,7 +540,7 @@ def steps2D(p, dP, inds, niter, omni=False, calc_trace=False):
 
 def follow_flows(dP, mask=None, inds=None, niter=200, interp=True, use_gpu=True, device=None, omni=False, calc_trace=False):
     """ define pixels and run dynamics to recover masks in 2D
-    
+
     Pixels are meshgrid. Only pixels with non-zero cell-probability
     are used (as defined by inds)
 
@@ -549,7 +549,7 @@ def follow_flows(dP, mask=None, inds=None, niter=200, interp=True, use_gpu=True,
 
     dP: float32, 3D or 4D array
         flows [axis x Ly x Lx] or [axis x Lz x Ly x Lx]
-    
+
     mask: (optional, default None)
         pixel mask to seed masks. Useful when flows have low magnitudes.
 
@@ -557,7 +557,7 @@ def follow_flows(dP, mask=None, inds=None, niter=200, interp=True, use_gpu=True,
         number of iterations of dynamics to run
 
     interp: bool (optional, default True)
-        interpolate during 2D dynamics (not available in 3D) 
+        interpolate during 2D dynamics (not available in 3D)
         (in previous versions + paper it was False)
 
     use_gpu: bool (optional, default False)
@@ -584,16 +584,16 @@ def follow_flows(dP, mask=None, inds=None, niter=200, interp=True, use_gpu=True,
     else:
         p = np.meshgrid(np.arange(shape[0]), np.arange(shape[1]), indexing='ij')
         # not sure why, but I had changed this to float64 at some point... tests showed that map_coordinates expects float32
-        # possible issues elsewhere? 
+        # possible issues elsewhere?
         p = np.array(p).astype(np.float32)
 
-        # added inds for debugging while preserving backwards compatibility 
+        # added inds for debugging while preserving backwards compatibility
         if inds is None:
             if omni and (mask is not None):
                 inds = np.array(np.nonzero(np.logical_or(mask,np.abs(dP[0])>1e-3))).astype(np.int32).T
             else:
                 inds = np.array(np.nonzero(np.abs(dP[0])>1e-3)).astype(np.int32).T
-        
+
         if inds.ndim < 2 or inds.shape[0] < 5:
             dynamics_logger.warning('WARNING: no mask pixels found')
             return p, inds, None
@@ -604,15 +604,15 @@ def follow_flows(dP, mask=None, inds=None, niter=200, interp=True, use_gpu=True,
         else:
             p_interp, tr = steps2D_interp(p[:,inds[:,0], inds[:,1]], dP, niter, use_gpu=use_gpu,
                                           device=device, omni=omni, calc_trace=calc_trace)
-            
+
             p[:,inds[:,0],inds[:,1]] = p_interp
     return p, inds, tr
 
 def remove_bad_flow_masks(masks, flows, threshold=0.4, use_gpu=False, device=None):
-    """ remove masks which have inconsistent flows 
-    
-    Uses metrics.flow_error to compute flows from predicted masks 
-    and compare flows to predicted flows from network. Discards 
+    """ remove masks which have inconsistent flows
+
+    Uses metrics.flow_error to compute flows from predicted masks
+    and compare flows to predicted flows from network. Discards
     masks with flow errors greater than the threshold.
 
     Parameters
@@ -632,10 +632,10 @@ def remove_bad_flow_masks(masks, flows, threshold=0.4, use_gpu=False, device=Non
     ---------------
 
     masks: int, 2D or 3D array
-        masks with inconsistent flow masks removed, 
+        masks with inconsistent flow masks removed,
         0=NO masks; 1,2,...=mask labels,
         size [Ly x Lx] or [Lz x Ly x Lx]
-    
+
     """
     merrors, _ = metrics.flow_error(masks, flows, use_gpu, device)
     badi = 1+(merrors>threshold).nonzero()[0]
@@ -644,37 +644,37 @@ def remove_bad_flow_masks(masks, flows, threshold=0.4, use_gpu=False, device=Non
 
 def get_masks(p, iscell=None, rpad=20, flows=None, threshold=0.4, use_gpu=False, device=None):
     """ create masks using pixel convergence after running dynamics
-    
-    Makes a histogram of final pixel locations p, initializes masks 
+
+    Makes a histogram of final pixel locations p, initializes masks
     at peaks of histogram and extends the masks from the peaks so that
-    they include all pixels with more than 2 final pixels p. Discards 
-    masks with flow errors greater than the threshold. 
+    they include all pixels with more than 2 final pixels p. Discards
+    masks with flow errors greater than the threshold.
     Parameters
     ----------------
     p: float32, 3D or 4D array
         final locations of each pixel after dynamics,
         size [axis x Ly x Lx] or [axis x Lz x Ly x Lx].
     iscell: bool, 2D or 3D array
-        if iscell is not None, set pixels that are 
+        if iscell is not None, set pixels that are
         iscell False to stay in their original location.
     rpad: int (optional, default 20)
         histogram edge padding
     threshold: float (optional, default 0.4)
-        masks with flow error greater than threshold are discarded 
+        masks with flow error greater than threshold are discarded
         (if flows is not None)
     flows: float, 3D or 4D array (optional, default None)
         flows [axis x Ly x Lx] or [axis x Lz x Ly x Lx]. If flows
-        is not None, then masks with inconsistent flows are removed using 
+        is not None, then masks with inconsistent flows are removed using
         `remove_bad_flow_masks`.
     Returns
     ---------------
     M0: int, 2D or 3D array
-        masks with inconsistent flow masks removed, 
+        masks with inconsistent flow masks removed,
         0=NO masks; 1,2,...=mask labels,
         size [Ly x Lx] or [Lz x Ly x Lx]
-    
+
     """
-    
+
     pflows = []
     edges = []
     shape0 = p.shape[1:]
@@ -734,39 +734,40 @@ def get_masks(p, iscell=None, rpad=20, flows=None, threshold=0.4, use_gpu=False,
                 pix[k][i] = newpix[i][igood]
             if iter==4:
                 pix[k] = tuple(pix[k])
-    
+
     M = np.zeros(h.shape, np.uint32)
     for k in range(len(pix)):
         M[pix[k]] = 1+k
-        
+
     for i in range(dims):
         pflows[i] = pflows[i] + rpad
     M0 = M[tuple(pflows)]
 
     # remove big masks
-    uniq, counts = fastremap.unique(M0, return_counts=True)
-    big = np.prod(shape0) * 0.4
-    bigc = uniq[counts > big]
-    if len(bigc) > 0 and (len(bigc)>1 or bigc[0]!=0):
-        M0 = fastremap.mask(M0, bigc)
-    fastremap.renumber(M0, in_place=True) #convenient to guarantee non-skipped labels
+    #uniq, counts = fastremap.unique(M0, return_counts=True)
+    #big = np.prod(shape0) * 0.4
+    #bigc = uniq[counts > big]
+    #if len(bigc) > 0 and (len(bigc)>1 or bigc[0]!=0):
+    #    M0 = fastremap.mask(M0, bigc)
+    #fastremap.renumber(M0, in_place=True) #convenient to guarantee non-skipped labels
+
     M0 = np.reshape(M0, shape0)
     return M0
 
 def compute_masks(dP, cellprob, bd=None, p=None, inds=None, niter=200, mask_threshold=0.0, diam_threshold=12.,
-                   flow_threshold=0.4, interp=True, do_3D=False, 
+                   flow_threshold=0.4, interp=True, do_3D=False,
                    min_size=15, resize=None, verbose=False,
                    use_gpu=False,device=None,nclasses=3):
     """ compute masks using dynamics from dP, cellprob, and boundary """
     if verbose:
          dynamics_logger.info('mask_threshold is %f',mask_threshold)
-    
+
     cp_mask = cellprob > mask_threshold # analog to original iscell=(cellprob>cellprob_threshold)
 
-    if np.any(cp_mask): #mask at this point is a cell cluster binary map, not labels     
+    if np.any(cp_mask): #mask at this point is a cell cluster binary map, not labels
         # follow flows
         if p is None:
-            p , inds, tr = follow_flows(dP * cp_mask / 5., mask=cp_mask, inds=inds, niter=niter, interp=interp, 
+            p , inds, tr = follow_flows(dP * cp_mask / 5., mask=cp_mask, inds=inds, niter=niter, interp=interp,
                                             use_gpu=use_gpu, device=device)
             if inds.ndim < 2 or inds.shape[0] < 5:
                 dynamics_logger.info('No cell pixels found.')
@@ -774,20 +775,20 @@ def compute_masks(dP, cellprob, bd=None, p=None, inds=None, niter=200, mask_thre
                 mask = np.zeros(shape, np.uint16)
                 p = np.zeros((len(shape), *shape), np.uint16)
                 return mask, p, []
-        else: 
+        else:
             if verbose:
                 dynamics_logger.info('p given')
-        
+
         #calculate masks
         mask = get_masks(p, iscell=cp_mask, flows=dP, use_gpu=use_gpu)
-            
+
         # flow thresholding factored out of get_masks
         if not do_3D:
             shape0 = p.shape[1:]
             if mask.max()>0 and flow_threshold is not None and flow_threshold > 0:
                 # make sure labels are unique at output of get_masks
                 mask = remove_bad_flow_masks(mask, dP, threshold=flow_threshold, use_gpu=use_gpu, device=device)
-        
+
         if resize is not None:
             #if verbose:
             #    dynamics_logger.info(f'resizing output with resize = {resize}')
@@ -814,7 +815,7 @@ def compute_masks(dP, cellprob, bd=None, p=None, inds=None, niter=200, mask_thre
 
     # moving the cleanup to the end helps avoid some bugs arising from scaling...
     # maybe better would be to rescale the min_size and hole_size parameters to do the
-    # cleanup at the prediction scale, or switch depending on which one is bigger... 
+    # cleanup at the prediction scale, or switch depending on which one is bigger...
     mask = utils.fill_holes_and_remove_small_masks(mask, min_size=min_size)
 
     if mask.dtype==np.uint32:
